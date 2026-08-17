@@ -1,9 +1,20 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json, bigint, boolean } from "drizzle-orm/mysql-core";
+import { bigint, boolean, int, json, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+
+// Better Auth managed tables (user, session, account, verification)
+export * from "./auth-schema";
 
 /**
  * Core user table backing auth flow.
  */
 export const users = mysqlTable("users", {
+  // Account-claim lifecycle for migrated users: "open" = self-owned (new
+  // sign-ups), "pending" = a claim link was issued, "claimed" = reclaimed.
+  claimStatus: mysqlEnum("claim_status", ["open", "pending", "claimed"])
+    .default("open")
+    .notNull(),
+  // Bridge to the Better Auth `user` table. Nullable: legacy Manus users have
+  // no auth account until they sign in for the first time and get claimed.
+  betterAuthId: varchar("betterAuthId", { length: 36 }).unique(),
   id: int("id").autoincrement().primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
@@ -193,3 +204,21 @@ export const comparisonHistory = mysqlTable("comparisonHistory", {
 
 export type ComparisonHistory = typeof comparisonHistory.$inferSelect;
 export type InsertComparisonHistory = typeof comparisonHistory.$inferInsert;
+
+
+// Single-use account-claim tokens issued by the Sovyn control plane so a
+// migrated user can reclaim their legacy row (see server/_core/claim.ts). The
+// plaintext token lives only in the emailed/displayed link; only its sha256
+// hash is stored here.
+export const sovynClaimTokens = mysqlTable("sovyn_claim_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  userId: int("user_id").notNull(),
+  email: varchar("email", { length: 320 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type SovynClaimToken = typeof sovynClaimTokens.$inferSelect;
+export type InsertSovynClaimToken = typeof sovynClaimTokens.$inferInsert;

@@ -1,16 +1,36 @@
-import { eq, desc, and, sql, like, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { 
-  InsertUser, users, 
-  contracts, InsertContract, Contract,
-  contractChunks, InsertContractChunk, ContractChunk,
-  chats, InsertChat, Chat,
-  chatMessages, InsertChatMessage, ChatMessage,
-  customColumns, InsertCustomColumn, CustomColumn,
-  contractCustomData, InsertContractCustomData, ContractCustomData,
-  summaryTemplates, InsertSummaryTemplate, SummaryTemplate,
-  contractSummaries, InsertContractSummary, ContractSummary,
-  comparisonHistory, InsertComparisonHistory, ComparisonHistory
+import {
+  Chat,
+  ChatMessage,
+  chatMessages,
+  chats,
+  comparisonHistory,
+  ComparisonHistory,
+  Contract,
+  ContractChunk,
+  contractChunks,
+  contractCustomData,
+  ContractCustomData,
+  contracts,
+  contractSummaries,
+  ContractSummary,
+  CustomColumn,
+  customColumns,
+  InsertChat,
+  InsertChatMessage,
+  InsertComparisonHistory,
+  InsertContract,
+  InsertContractChunk,
+  InsertContractCustomData,
+  InsertContractSummary,
+  InsertCustomColumn,
+  InsertSummaryTemplate,
+  InsertUser,
+  sovynClaimTokens,
+  SummaryTemplate,
+  summaryTemplates,
+  users,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -867,4 +887,112 @@ export async function deleteComparisonHistory(id: number): Promise<void> {
   if (!db) throw new Error("Database not available");
 
   await db.delete(comparisonHistory).where(eq(comparisonHistory.id, id));
+}
+
+// ─── Better Auth bridge ───────────────────────────────────────────────────────
+
+export async function getUserByBetterAuthId(betterAuthId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.betterAuthId, betterAuthId))
+    .limit(1);
+  return result[0];
+}
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+// ─── Token-gated account claim (migrated users) ───────────────────────────────
+//
+// Legacy users have no auth account after migration. They reclaim their data
+// ONLY by presenting a single-use claim token issued by the control plane —
+// never by knowing the email. See server/_core/claim.ts for the flow.
+
+// Look up a claim token by its sha256 hash. Returns the raw row (including
+// expiresAt / usedAt) so the caller can produce precise "expired" vs "already
+// used" errors; validity is enforced in claim.ts.
+export async function findClaimTokenByHash(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(sovynClaimTokens)
+    .where(eq(sovynClaimTokens.tokenHash, tokenHash))
+    .limit(1);
+  return result[0];
+}
+
+// A pending user is a migrated, still-unclaimed row for which the control plane
+// has issued a claim link. Plain email/password sign-ups with such an email are
+// rejected (see server/auth.ts) so an attacker cannot pre-empt the real owner.
+export async function findPendingUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db
+    .select()
+    .from(users)
+    .where(
+      and(
+        eq(users.email, email),
+        isNull(users.betterAuthId),
+        eq(users.claimStatus, "pending")
+      )
+    )
+    .limit(1);
+  return result[0];
+}
+
+// Bind a freshly created Better Auth identity to the legacy row and burn the
+// token — atomically, so a token can never be spent twice.
+export async function completeUserClaim(input: {
+  tokenId: number;
+  userId: number;
+  betterAuthId: string;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        betterAuthId: input.betterAuthId,
+        claimStatus: "claimed",
+        lastSignedIn: new Date(),
+      })
+      .where(eq(users.id, input.userId));
+    await tx
+      .update(sovynClaimTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(sovynClaimTokens.id, input.tokenId));
+  });
+}
+
+export async function createUserFromAuth(input: {
+  betterAuthId: string;
+  email: string | null;
+  name: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const values: InsertUser = {
+    // openId is NOT NULL UNIQUE; derive a stable synthetic id for new users.
+    openId: `ba:${input.betterAuthId}`,
+    betterAuthId: input.betterAuthId,
+    email: input.email,
+    name: input.name,
+    loginMethod: "password",
+    // New sign-ups own their own auth from the start — nothing to claim.
+    claimStatus: "claimed",
+    lastSignedIn: new Date(),
+  };
+  const [{ id }] = await db.insert(users).values(values).$returningId();
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
 }

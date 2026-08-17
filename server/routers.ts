@@ -1,3 +1,5 @@
+import { fromNodeHeaders } from "better-auth/node";
+import { auth } from "./auth";
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -72,7 +74,19 @@ export const appRouter = router({
   
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      try {
+        const result = await auth.api.signOut({
+          headers: fromNodeHeaders(ctx.req.headers),
+          returnHeaders: true,
+        });
+        // Propagate Better Auth's session-clearing set-cookie to the client.
+        const setCookie = result?.headers?.get("set-cookie");
+        if (setCookie) ctx.res.append("set-cookie", setCookie);
+      } catch {
+        // No active Better Auth session — logout is idempotent.
+      }
+      // Also clear the legacy Manus session cookie so pre-migration sessions end.
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;

@@ -64,6 +64,13 @@
       "when": 1770477218272,
       "tag": "0009_warm_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786990256328,
+      "tag": "0010_flowery_spot",
+      "breakpoints": true
     }
   ]
 }
