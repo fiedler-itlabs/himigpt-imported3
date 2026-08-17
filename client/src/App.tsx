@@ -1,3 +1,5 @@
+import Login from "./pages/Login";
+import Claim from "./pages/Claim";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -12,6 +14,8 @@ import DashboardLayout from "./components/DashboardLayout";
 function Router() {
   return (
     <Switch>
+      <Route path="/login" component={Login} />
+      <Route path="/claim" component={Claim} />
       <Route path="/" component={Home} />
       <Route path="/chat" component={Chat} />
       <Route path="/chat/:chatId" component={Chat} />

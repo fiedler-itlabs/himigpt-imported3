@@ -1,6 +1,8 @@
+import { fromNodeHeaders } from "better-auth/node";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
+import { auth } from "../auth";
+import { resolveAuthUser } from "./authBridge";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -14,7 +16,16 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    user = await sdk.authenticateRequest(opts.req);
+    const session = await auth.api.getSession({
+      headers: fromNodeHeaders(opts.req.headers),
+    });
+    if (session?.user) {
+      user = await resolveAuthUser({
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name,
+      });
+    }
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;

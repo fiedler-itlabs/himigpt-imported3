@@ -1,9 +1,11 @@
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "../auth";
+import { registerClaimRoutes } from "./claim";
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -31,10 +33,12 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
+  // Better Auth handles its own body parsing — mount BEFORE express.json().
+  app.all("/api/auth/*", toNodeHandler(auth));
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
-  registerOAuthRoutes(app);
+  registerClaimRoutes(app);
   
   // PDF Proxy to avoid CORS issues
   app.get("/api/pdf/proxy/:contractId", async (req, res) => {
